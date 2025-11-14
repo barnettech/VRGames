@@ -40,7 +40,8 @@
     <a-entity
         id="rig"
         movement-controls="speed: 3; fly: false"
-        position="0 1.6 5">
+      xr-joystick-controls="speed: 3; deadzone: 0.18"
+      position="0 1.6 5">
       <a-entity camera look-controls>
         <!-- HUD attached to camera -->
         <a-entity id="hud" position="0 0 -1.5">
@@ -260,6 +261,68 @@
             this.player.object3D.position.set(0, 1.6, 5);
           }
         }
+      }
+    });
+
+    // XR JOYSTICK CONTROLS: map left-controller thumbstick to rig movement in XR
+    AFRAME.registerComponent('xr-joystick-controls', {
+      schema: {
+        speed: { type: 'number', default: 3 },
+        deadzone: { type: 'number', default: 0.18 }
+      },
+      init: function () {
+        this.camera = document.querySelector('[camera]');
+        this._dir = new THREE.Vector3();
+        this._right = new THREE.Vector3();
+        this._move = new THREE.Vector3();
+      },
+      tick: function (time, delta) {
+        const dt = delta / 1000;
+        if (!navigator.getGamepads) return;
+        const gps = navigator.getGamepads();
+        if (!gps) return;
+
+        // Prefer a gamepad that advertises itself as left-hand in WebXR
+        let gp = null;
+        for (let i = 0; i < gps.length; i++) {
+          const g = gps[i];
+          if (!g) continue;
+          if (g.hand === 'left' && g.axes && g.axes.length >= 2) { gp = g; break; }
+          if (!gp && g.axes && g.axes.length >= 2) gp = g;
+        }
+        if (!gp) return;
+
+        // Typical mapping: axes[0] = x (left/right), axes[1] = y (up/down)
+        let ax = gp.axes[0] || 0;
+        let ay = gp.axes[1] || 0;
+        // Some controllers expose thumbstick on axes 2/3; try those if first pair is quiet
+        if (Math.abs(ax) < 0.0001 && Math.abs(ay) < 0.0001 && gp.axes.length >= 4) {
+          ax = gp.axes[2] || 0;
+          ay = gp.axes[3] || 0;
+        }
+
+        // Deadzone
+        if (Math.abs(ax) < this.data.deadzone) ax = 0;
+        if (Math.abs(ay) < this.data.deadzone) ay = 0;
+        if (ax === 0 && ay === 0) return;
+
+        const camObj = this.camera && this.camera.object3D;
+        if (!camObj) return;
+
+        // Forward direction (world) from camera, flattened to horizontal plane
+        camObj.getWorldDirection(this._dir);
+        this._dir.y = 0;
+        this._dir.normalize();
+
+        // Right vector = forward cross up
+        this._right.crossVectors(this._dir, camObj.up).normalize();
+
+        // Many controllers report negative Y when pushing forward, so invert Y
+        const forwardAmount = -ay * this.data.speed * dt;
+        const sideAmount = ax * this.data.speed * dt;
+
+        this._move.copy(this._dir).multiplyScalar(forwardAmount).addScaledVector(this._right, sideAmount);
+        this.el.object3D.position.add(this._move);
       }
     });
 

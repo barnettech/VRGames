@@ -4,9 +4,13 @@
   <meta charset="UTF-8">
   <title>VR Pac-Rabbi Dungeon</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
   <!-- A-Frame (WebXR) -->
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+
+  <!-- Movement controls (keyboard + VR controllers) -->
   <script src="https://cdn.jsdelivr.net/npm/aframe-extras@6.1.1/dist/aframe-extras.min.js"></script>
+
   <style>
     body { margin: 0; background: #000; }
   </style>
@@ -15,6 +19,7 @@
   <a-scene
     renderer="antialias: true"
     background="color: #101020"
+    vr-mode-ui="enabled: true"
     game-state
   >
     <!-- LIGHTS -->
@@ -25,23 +30,23 @@
     <a-plane rotation="-90 0 0" width="18" height="18" color="#222233"></a-plane>
 
     <!-- SIMPLE DUNGEON WALLS -->
-    <a-box collidable position="0 1 -8" depth="0.6" height="2" width="16" color="#3b3b5c"></a-box>
-    <a-box collidable position="0 1 8" depth="0.6" height="2" width="16" color="#3b3b5c"></a-box>
-    <a-box collidable position="-8 1 0" depth="16" height="2" width="0.6" color="#3b3b5c"></a-box>
-    <a-box collidable position="8 1 0" depth="16" height="2" width="0.6" color="#3b3b5c"></a-box>
+    <a-box position="0 1 -8" depth="0.6" height="2" width="16" color="#3b3b5c"></a-box>
+    <a-box position="0 1 8" depth="0.6" height="2" width="16" color="#3b3b5c"></a-box>
+    <a-box position="-8 1 0" depth="16" height="2" width="0.6" color="#3b3b5c"></a-box>
+    <a-box position="8 1 0" depth="16" height="2" width="0.6" color="#3b3b5c"></a-box>
 
     <!-- INNER WALLS TO MAKE A LITTLE MAZE -->
-    <a-box collidable position="0 1 0" depth="0.5" height="2" width="8" color="#303050"></a-box>
-    <a-box collidable position="-3 1 3" depth="0.5" height="2" width="8" rotation="0 90 0" color="#303050"></a-box>
-    <a-box collidable position="3 1 -3" depth="0.5" height="2" width="8" rotation="0 90 0" color="#303050"></a-box>
+    <a-box position="0 1 0" depth="0.5" height="2" width="8" color="#303050"></a-box>
+    <a-box position="-3 1 3" depth="0.5" height="2" width="8" rotation="0 90 0" color="#303050"></a-box>
+    <a-box position="3 1 -3" depth="0.5" height="2" width="8" rotation="0 90 0" color="#303050"></a-box>
 
     <!-- PLAYER RIG (YOU) -->
-    <!-- WASD on desktop, thumbstick + head look in Quest. Camera is child. -->
+    <!-- movement-controls: WASD/arrow on desktop + thumbsticks in VR -->
     <a-entity
-        id="rig"
-        movement-controls="speed: 3; fly: false"
-      xr-joystick-controls="speed: 3; deadzone: 0.18"
-      position="0 1.6 5">
+      id="rig"
+      movement-controls="speed: 3; fly: false"
+      position="0 1.6 5"
+    >
       <a-entity camera look-controls>
         <!-- HUD attached to camera -->
         <a-entity id="hud" position="0 0 -1.5">
@@ -84,7 +89,6 @@
     </a-box>
 
     <!-- PELLETS (yellow dots to eat for points) -->
-    <!-- You can add/remove pellets or change their positions to shape the maze path. -->
     <a-entity id="pellets">
       <!-- Row 1 -->
       <a-sphere pellet radius="0.12" color="#ffd800" position="-6 0.3 6"></a-sphere>
@@ -128,18 +132,6 @@
   </a-scene>
 
   <script>
-    // Global error reporter: show errors on the HUD `#statusText` so VR users can see them
-    window.addEventListener('error', function (ev) {
-      console.error('Window error:', ev.error || ev.message || ev);
-      const status = document.querySelector('#statusText');
-      if (status) status.setAttribute('value', 'ERROR: ' + (ev.error && ev.error.message ? ev.error.message : ev.message || ev.error || 'unknown'));
-    });
-    window.addEventListener('unhandledrejection', function (ev) {
-      console.error('Unhandled rejection:', ev.reason);
-      const status = document.querySelector('#statusText');
-      if (status) status.setAttribute('value', 'ERROR: ' + (ev.reason && ev.reason.message ? ev.reason.message : String(ev.reason)));
-    });
-
     // Simple global game state
     const GameState = {
       score: 0,
@@ -276,121 +268,9 @@
       }
     });
 
-    // XR JOYSTICK CONTROLS: map left-controller thumbstick to rig movement in XR
-    AFRAME.registerComponent('xr-joystick-controls', {
-      schema: {
-        speed: { type: 'number', default: 3 },
-        deadzone: { type: 'number', default: 0.18 },
-        radius: { type: 'number', default: 0.35 },
-        debug: { type: 'boolean', default: false }
-      },
-      init: function () {
-        this.camera = document.querySelector('[camera]');
-        this._dir = new THREE.Vector3();
-        this._right = new THREE.Vector3();
-        this._move = new THREE.Vector3();
-        this._proposed = new THREE.Vector3();
-        this._clamped = new THREE.Vector3();
-        // gather collidable elements (walls marked with `collidable` attribute)
-        this._colliders = Array.from(document.querySelectorAll('[collidable]')).map(el => el.object3D);
-      },
-      tick: function (time, delta) {
-        const dt = delta / 1000;
-        let gps = null;
-        try {
-          if (navigator.getGamepads) gps = navigator.getGamepads();
-        } catch (e) {
-          // some environments might throw; bail quietly
-          gps = null;
-        }
-        if (!gps) return;
-
-        // Prefer a gamepad that advertises itself as left-hand in WebXR
-        let gp = null;
-        for (let i = 0; i < gps.length; i++) {
-          const g = gps[i];
-          if (!g) continue;
-          if (g.hand === 'left' && Array.isArray(g.axes) && g.axes.length >= 2) { gp = g; break; }
-          if (!gp && Array.isArray(g.axes) && g.axes.length >= 2) gp = g;
-        }
-        if (!gp) return;
-
-        // Read axes safely
-        let ax = 0, ay = 0;
-        try {
-          ax = (gp.axes && gp.axes.length > 0) ? gp.axes[0] : 0;
-          ay = (gp.axes && gp.axes.length > 1) ? gp.axes[1] : 0;
-          // fallback to axes 2/3 if 0
-          if (Math.abs(ax) < 0.0001 && Math.abs(ay) < 0.0001 && gp.axes.length >= 4) {
-            ax = gp.axes[2] || 0;
-            ay = gp.axes[3] || 0;
-          }
-        } catch (e) {
-          return; // something weird with gamepad data
-        }
-
-        // If debug, surface detected gamepad/axes to HUD
-        if (this.data.debug) {
-          const status = document.querySelector('#statusText');
-          try {
-            const id = gp.id || 'gp';
-            if (status) status.setAttribute('value', `GP:${id} ax:${ax.toFixed(2)} ay:${ay.toFixed(2)}`);
-          } catch (e) {
-            // ignore
-          }
-        }
-
-        // Deadzone
-        if (Math.abs(ax) < this.data.deadzone) ax = 0;
-        if (Math.abs(ay) < this.data.deadzone) ay = 0;
-        if (ax === 0 && ay === 0) return;
-
-        const camObj = this.camera && this.camera.object3D;
-        if (!camObj) return;
-
-        // Forward direction (world) from camera, flattened to horizontal plane
-        camObj.getWorldDirection(this._dir);
-        this._dir.y = 0;
-        this._dir.normalize();
-
-        // Right vector = forward cross up
-        this._right.crossVectors(this._dir, camObj.up).normalize();
-
-        // Many controllers report negative Y when pushing forward, so invert Y
-        const forwardAmount = -ay * this.data.speed * dt;
-        const sideAmount = ax * this.data.speed * dt;
-
-        this._move.copy(this._dir).multiplyScalar(forwardAmount).addScaledVector(this._right, sideAmount);
-
-        // Collision prevention: compute proposed position and test against colliders
-        this._proposed.copy(this.el.object3D.position).add(this._move);
-        const pr = this._proposed;
-        const radius = this.data.radius;
-
-        for (let i = 0; i < this._colliders.length; i++) {
-          const c = this._colliders[i];
-          if (!c) continue;
-          // compute world-aligned bounding box for collider
-          const box = new THREE.Box3().setFromObject(c);
-          // clamp proposed point to box to get closest point
-          this._clamped.copy(pr).clamp(box.min, box.max);
-          const dx = this._clamped.x - pr.x;
-          const dz = this._clamped.z - pr.z;
-          const distSq = dx * dx + dz * dz;
-          if (distSq < radius * radius) {
-            // collision detected; cancel movement for now
-            return;
-          }
-        }
-
-        // no collision -> apply movement
-        this.el.object3D.position.add(this._move);
-      }
-    });
-
     // GAME STATE: handle timer for power-up expiring
     AFRAME.registerComponent('game-state', {
-      tick: function (time, delta) {
+      tick: function () {
         if (GameState.poweredUp && performance.now() > GameState.powerEndTime) {
           clearPoweredUp();
         }

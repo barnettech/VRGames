@@ -37,7 +37,10 @@
 
     <!-- PLAYER RIG (YOU) -->
     <!-- WASD on desktop, thumbstick + head look in Quest. Camera is child. -->
-    <a-entity id="rig" wasd-controls="acceleration: 40" position="0 1.6 5">
+    <a-entity
+        id="rig"
+        movement-controls="speed: 3; fly: false"
+        position="0 1.6 5">
       <a-entity camera look-controls>
         <!-- HUD attached to camera -->
         <a-entity id="hud" position="0 0 -1.5">

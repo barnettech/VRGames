@@ -4,13 +4,8 @@
   <meta charset="UTF-8">
   <title>VR Pac-Rabbi Dungeon</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
   <!-- A-Frame (WebXR) -->
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-
-  <!-- Movement controls (keyboard + VR controllers) -->
-  <script src="https://cdn.jsdelivr.net/npm/aframe-extras@6.1.1/dist/aframe-extras.min.js"></script>
-
   <style>
     body { margin: 0; background: #000; }
   </style>
@@ -19,7 +14,6 @@
   <a-scene
     renderer="antialias: true"
     background="color: #101020"
-    vr-mode-ui="enabled: true"
     game-state
   >
     <!-- LIGHTS -->
@@ -41,12 +35,8 @@
     <a-box position="3 1 -3" depth="0.5" height="2" width="8" rotation="0 90 0" color="#303050"></a-box>
 
     <!-- PLAYER RIG (YOU) -->
-    <!-- movement-controls: WASD/arrow on desktop + thumbsticks in VR -->
-    <a-entity
-      id="rig"
-      movement-controls="speed: 3; fly: false"
-      position="0 1.6 5"
-    >
+    <!-- WASD on desktop, thumbstick + head look in Quest. Camera is child. -->
+    <a-entity id="rig" wasd-controls="acceleration: 40" position="0 1.6 5">
       <a-entity camera look-controls>
         <!-- HUD attached to camera -->
         <a-entity id="hud" position="0 0 -1.5">
@@ -89,6 +79,7 @@
     </a-box>
 
     <!-- PELLETS (yellow dots to eat for points) -->
+    <!-- You can add/remove pellets or change their positions to shape the maze path. -->
     <a-entity id="pellets">
       <!-- Row 1 -->
       <a-sphere pellet radius="0.12" color="#ffd800" position="-6 0.3 6"></a-sphere>
@@ -270,7 +261,7 @@
 
     // GAME STATE: handle timer for power-up expiring
     AFRAME.registerComponent('game-state', {
-      tick: function () {
+      tick: function (time, delta) {
         if (GameState.poweredUp && performance.now() > GameState.powerEndTime) {
           clearPoweredUp();
         }

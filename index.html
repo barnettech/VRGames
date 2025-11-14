@@ -25,15 +25,15 @@
     <a-plane rotation="-90 0 0" width="18" height="18" color="#222233"></a-plane>
 
     <!-- SIMPLE DUNGEON WALLS -->
-    <a-box position="0 1 -8" depth="0.6" height="2" width="16" color="#3b3b5c"></a-box>
-    <a-box position="0 1 8" depth="0.6" height="2" width="16" color="#3b3b5c"></a-box>
-    <a-box position="-8 1 0" depth="16" height="2" width="0.6" color="#3b3b5c"></a-box>
-    <a-box position="8 1 0" depth="16" height="2" width="0.6" color="#3b3b5c"></a-box>
+    <a-box collidable position="0 1 -8" depth="0.6" height="2" width="16" color="#3b3b5c"></a-box>
+    <a-box collidable position="0 1 8" depth="0.6" height="2" width="16" color="#3b3b5c"></a-box>
+    <a-box collidable position="-8 1 0" depth="16" height="2" width="0.6" color="#3b3b5c"></a-box>
+    <a-box collidable position="8 1 0" depth="16" height="2" width="0.6" color="#3b3b5c"></a-box>
 
     <!-- INNER WALLS TO MAKE A LITTLE MAZE -->
-    <a-box position="0 1 0" depth="0.5" height="2" width="8" color="#303050"></a-box>
-    <a-box position="-3 1 3" depth="0.5" height="2" width="8" rotation="0 90 0" color="#303050"></a-box>
-    <a-box position="3 1 -3" depth="0.5" height="2" width="8" rotation="0 90 0" color="#303050"></a-box>
+    <a-box collidable position="0 1 0" depth="0.5" height="2" width="8" color="#303050"></a-box>
+    <a-box collidable position="-3 1 3" depth="0.5" height="2" width="8" rotation="0 90 0" color="#303050"></a-box>
+    <a-box collidable position="3 1 -3" depth="0.5" height="2" width="8" rotation="0 90 0" color="#303050"></a-box>
 
     <!-- PLAYER RIG (YOU) -->
     <!-- WASD on desktop, thumbstick + head look in Quest. Camera is child. -->
@@ -268,18 +268,28 @@
     AFRAME.registerComponent('xr-joystick-controls', {
       schema: {
         speed: { type: 'number', default: 3 },
-        deadzone: { type: 'number', default: 0.18 }
+        deadzone: { type: 'number', default: 0.18 },
+        radius: { type: 'number', default: 0.35 }
       },
       init: function () {
         this.camera = document.querySelector('[camera]');
         this._dir = new THREE.Vector3();
         this._right = new THREE.Vector3();
         this._move = new THREE.Vector3();
+        this._proposed = new THREE.Vector3();
+        this._clamped = new THREE.Vector3();
+        // gather collidable elements (walls marked with `collidable` attribute)
+        this._colliders = Array.from(document.querySelectorAll('[collidable]')).map(el => el.object3D);
       },
       tick: function (time, delta) {
         const dt = delta / 1000;
-        if (!navigator.getGamepads) return;
-        const gps = navigator.getGamepads();
+        let gps = null;
+        try {
+          if (navigator.getGamepads) gps = navigator.getGamepads();
+        } catch (e) {
+          // some environments might throw; bail quietly
+          gps = null;
+        }
         if (!gps) return;
 
         // Prefer a gamepad that advertises itself as left-hand in WebXR
@@ -287,18 +297,23 @@
         for (let i = 0; i < gps.length; i++) {
           const g = gps[i];
           if (!g) continue;
-          if (g.hand === 'left' && g.axes && g.axes.length >= 2) { gp = g; break; }
-          if (!gp && g.axes && g.axes.length >= 2) gp = g;
+          if (g.hand === 'left' && Array.isArray(g.axes) && g.axes.length >= 2) { gp = g; break; }
+          if (!gp && Array.isArray(g.axes) && g.axes.length >= 2) gp = g;
         }
         if (!gp) return;
 
-        // Typical mapping: axes[0] = x (left/right), axes[1] = y (up/down)
-        let ax = gp.axes[0] || 0;
-        let ay = gp.axes[1] || 0;
-        // Some controllers expose thumbstick on axes 2/3; try those if first pair is quiet
-        if (Math.abs(ax) < 0.0001 && Math.abs(ay) < 0.0001 && gp.axes.length >= 4) {
-          ax = gp.axes[2] || 0;
-          ay = gp.axes[3] || 0;
+        // Read axes safely
+        let ax = 0, ay = 0;
+        try {
+          ax = (gp.axes && gp.axes.length > 0) ? gp.axes[0] : 0;
+          ay = (gp.axes && gp.axes.length > 1) ? gp.axes[1] : 0;
+          // fallback to axes 2/3 if 0
+          if (Math.abs(ax) < 0.0001 && Math.abs(ay) < 0.0001 && gp.axes.length >= 4) {
+            ax = gp.axes[2] || 0;
+            ay = gp.axes[3] || 0;
+          }
+        } catch (e) {
+          return; // something weird with gamepad data
         }
 
         // Deadzone
@@ -322,6 +337,29 @@
         const sideAmount = ax * this.data.speed * dt;
 
         this._move.copy(this._dir).multiplyScalar(forwardAmount).addScaledVector(this._right, sideAmount);
+
+        // Collision prevention: compute proposed position and test against colliders
+        this._proposed.copy(this.el.object3D.position).add(this._move);
+        const pr = this._proposed;
+        const radius = this.data.radius;
+
+        for (let i = 0; i < this._colliders.length; i++) {
+          const c = this._colliders[i];
+          if (!c) continue;
+          // compute world-aligned bounding box for collider
+          const box = new THREE.Box3().setFromObject(c);
+          // clamp proposed point to box to get closest point
+          this._clamped.copy(pr).clamp(box.min, box.max);
+          const dx = this._clamped.x - pr.x;
+          const dz = this._clamped.z - pr.z;
+          const distSq = dx * dx + dz * dz;
+          if (distSq < radius * radius) {
+            // collision detected; cancel movement for now
+            return;
+          }
+        }
+
+        // no collision -> apply movement
         this.el.object3D.position.add(this._move);
       }
     });

@@ -128,6 +128,18 @@
   </a-scene>
 
   <script>
+    // Global error reporter: show errors on the HUD `#statusText` so VR users can see them
+    window.addEventListener('error', function (ev) {
+      console.error('Window error:', ev.error || ev.message || ev);
+      const status = document.querySelector('#statusText');
+      if (status) status.setAttribute('value', 'ERROR: ' + (ev.error && ev.error.message ? ev.error.message : ev.message || ev.error || 'unknown'));
+    });
+    window.addEventListener('unhandledrejection', function (ev) {
+      console.error('Unhandled rejection:', ev.reason);
+      const status = document.querySelector('#statusText');
+      if (status) status.setAttribute('value', 'ERROR: ' + (ev.reason && ev.reason.message ? ev.reason.message : String(ev.reason)));
+    });
+
     // Simple global game state
     const GameState = {
       score: 0,
@@ -269,7 +281,8 @@
       schema: {
         speed: { type: 'number', default: 3 },
         deadzone: { type: 'number', default: 0.18 },
-        radius: { type: 'number', default: 0.35 }
+        radius: { type: 'number', default: 0.35 },
+        debug: { type: 'boolean', default: false }
       },
       init: function () {
         this.camera = document.querySelector('[camera]');
@@ -314,6 +327,17 @@
           }
         } catch (e) {
           return; // something weird with gamepad data
+        }
+
+        // If debug, surface detected gamepad/axes to HUD
+        if (this.data.debug) {
+          const status = document.querySelector('#statusText');
+          try {
+            const id = gp.id || 'gp';
+            if (status) status.setAttribute('value', `GP:${id} ax:${ax.toFixed(2)} ay:${ay.toFixed(2)}`);
+          } catch (e) {
+            // ignore
+          }
         }
 
         // Deadzone
